@@ -1,5 +1,7 @@
 # audio-io-kmp
 
+![](https://img.cdn1.vip/i/6aa67c478981b_1789295687.webp)
+
 Kotlin Multiplatform audio I/O library. It captures and plays back **linear
 PCM** with a precisely configurable sample rate, channel count and sample
 format, and reads or writes exactly as many frames, samples or bytes as the
@@ -235,14 +237,8 @@ The interface fills the whole window: the main ImGui window is re-sized to the
 ImGui viewport every frame and drawn without decoration, so the layout follows
 the SDL window on every resize.
 
-The draw data is rendered by the example itself (`DrawDataRenderer`) instead of
-by the bundled SDL backend: ImGui merges items into commands whose vertices
-follow the previous command, and a backend that copies the range from the
-command's vertex offset needs that offset to be reported correctly. When it is
-not (it stays `0`), every command copies the whole draw list up to its own
-vertices - about seven times the geometry of a frame, and 190 ms per frame on a
-phone. The renderer here only trusts the indices and copies exactly the vertices
-a command uses.
+The draw data is handed to imgui-kmp's SDL renderer backend, which copies only
+the vertices each draw command references.
 
 The waterfall is drawn as a 128 x 64 texture rather than as an ImPlot heatmap.
 A heatmap cell costs four vertices in the render backend, which for a
