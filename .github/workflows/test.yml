@@ -56,7 +56,7 @@ jobs:
 
       - name: Publish the macOS artifacts to Maven Local
         run: >
-          ./gradlew --no-daemon --stacktrace
+          ./gradlew --no-daemon --rerun-tasks --stacktrace
           -Psigning.keyId="${{ secrets.SIGNING_KEY_ID }}"
           -Psigning.secretKeyRingFile="${{ runner.temp }}/signing-key.gpg"
           -Psigning.password="${{ secrets.SIGNING_PASSWORD }}"
@@ -76,8 +76,10 @@ jobs:
           ./gradlew --no-daemon :examples:audio-visualizer:jvmRun
           --args="--frames 60"
 
-      - name: Build the visualizer example (macosArm64)
-        run: ./gradlew --no-daemon :examples:audio-visualizer:linkDebugExecutableMacosArm64
+      - name: Run the visualizer example (macosArm64, headless)
+        run: >
+          AUDIO_VISUALIZER_FRAMES=60
+          ./gradlew --no-daemon :examples:audio-visualizer:runDebugExecutableMacosArm64
 
   test-linux:
     name: Test Linux x64
@@ -114,7 +116,7 @@ jobs:
 
       - name: Publish the Linux artifacts to Maven Local
         run: >
-          ./gradlew --no-daemon --stacktrace
+          ./gradlew --no-daemon --rerun-tasks --stacktrace
           -Psigning.keyId="${{ secrets.SIGNING_KEY_ID }}"
           -Psigning.secretKeyRingFile="${{ runner.temp }}/signing-key.gpg"
           -Psigning.password="${{ secrets.SIGNING_PASSWORD }}"
@@ -126,6 +128,16 @@ jobs:
 
       - name: Run ALSA tests
         run: ./gradlew --no-daemon :audio-io-kmp:linuxX64Test
+
+      - name: Run the visualizer example (JVM, headless)
+        run: >
+          ./gradlew --no-daemon :examples:audio-visualizer:jvmRun
+          --args="--frames 60"
+
+      - name: Run the visualizer example (linuxX64, headless)
+        run: >
+          AUDIO_VISUALIZER_FRAMES=60
+          ./gradlew --no-daemon :examples:audio-visualizer:runDebugExecutableLinuxX64
 
   test-windows:
     name: Test Windows x64 (mingwX64)
@@ -151,7 +163,7 @@ jobs:
 
       - name: Publish the mingwX64 artifact to Maven Local
         run: >
-          ./gradlew --no-daemon --stacktrace
+          ./gradlew --no-daemon --rerun-tasks --stacktrace
           -Psigning.keyId="${{ secrets.SIGNING_KEY_ID }}"
           -Psigning.secretKeyRingFile="${{ runner.temp }}/signing-key.gpg"
           -Psigning.password="${{ secrets.SIGNING_PASSWORD }}"
@@ -162,6 +174,9 @@ jobs:
           ./gradlew --no-daemon --stacktrace
           :audio-io-kmp:compileKotlinMingwX64
           :audio-io-kmp:linkDebugTestMingwX64
+
+      - name: Run JVM tests
+        run: ./gradlew --no-daemon :audio-io-kmp:jvmTest
 
   test-android:
     name: Test Android (androidNative + AAR)
@@ -202,7 +217,7 @@ jobs:
 
       - name: Publish the Android artifacts to Maven Local
         run: >
-          ./gradlew --no-daemon --stacktrace
+          ./gradlew --no-daemon --rerun-tasks --stacktrace
           -Psigning.keyId="${{ secrets.SIGNING_KEY_ID }}"
           -Psigning.secretKeyRingFile="${{ runner.temp }}/signing-key.gpg"
           -Psigning.password="${{ secrets.SIGNING_PASSWORD }}"
