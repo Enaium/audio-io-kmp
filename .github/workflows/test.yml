@@ -13,6 +13,10 @@ name: Test
 #   Linux x64   -> androidNative klibs (arm64/arm32/x64/x86), the Android AAR
 #                  and the visualizer APK
 #
+# Every job publishes the artifacts of its platforms to the local Maven
+# repository before running the tests, which exercises the publications and
+# their signatures (the same repository secrets the publish workflow uses).
+#
 # Trigger: run manually from the Actions tab.
 
 concurrency:
@@ -46,9 +50,16 @@ jobs:
       # exercises every publication (metadata, sources, module, klib) the
       # release would produce, and the tests below then run against a module
       # that was packaged exactly once.
+      - name: Decode signing key
+        run: |
+          echo "${{ secrets.SIGNING_KEY }}" | tr -d ' \n' | base64 -d > "$RUNNER_TEMP/signing-key.gpg"
+
       - name: Publish the macOS artifacts to Maven Local
         run: >
           ./gradlew --no-daemon --stacktrace
+          -Psigning.keyId="${{ secrets.SIGNING_KEY_ID }}"
+          -Psigning.secretKeyRingFile="${{ runner.temp }}/signing-key.gpg"
+          -Psigning.password="${{ secrets.SIGNING_PASSWORD }}"
           :audio-io-kmp:publishKotlinMultiplatformPublicationToMavenLocal
           :audio-io-kmp:publishJvmPublicationToMavenLocal
           :audio-io-kmp:publishMacosArm64PublicationToMavenLocal
@@ -97,9 +108,16 @@ jobs:
           :audio-io-kmp:compileKotlinLinuxX64
           :audio-io-kmp:compileKotlinLinuxArm64
 
+      - name: Decode signing key
+        run: |
+          echo "${{ secrets.SIGNING_KEY }}" | tr -d ' \n' | base64 -d > "$RUNNER_TEMP/signing-key.gpg"
+
       - name: Publish the Linux artifacts to Maven Local
         run: >
           ./gradlew --no-daemon --stacktrace
+          -Psigning.keyId="${{ secrets.SIGNING_KEY_ID }}"
+          -Psigning.secretKeyRingFile="${{ runner.temp }}/signing-key.gpg"
+          -Psigning.password="${{ secrets.SIGNING_PASSWORD }}"
           :audio-io-kmp:publishLinuxX64PublicationToMavenLocal
           :audio-io-kmp:publishLinuxArm64PublicationToMavenLocal
 
@@ -127,8 +145,17 @@ jobs:
 
       # The WASAPI headers and import libraries come from the MinGW sysroot
       # that Kotlin/Native downloads itself, so no extra toolchain is needed.
+      - name: Decode signing key
+        run: |
+          echo "${{ secrets.SIGNING_KEY }}" | tr -d ' \n' | base64 -d > "$RUNNER_TEMP/signing-key.gpg"
+
       - name: Publish the mingwX64 artifact to Maven Local
-        run: ./gradlew --no-daemon --stacktrace :audio-io-kmp:publishMingwX64PublicationToMavenLocal
+        run: >
+          ./gradlew --no-daemon --stacktrace
+          -Psigning.keyId="${{ secrets.SIGNING_KEY_ID }}"
+          -Psigning.secretKeyRingFile="${{ runner.temp }}/signing-key.gpg"
+          -Psigning.password="${{ secrets.SIGNING_PASSWORD }}"
+          :audio-io-kmp:publishMingwX64PublicationToMavenLocal
 
       - name: Build the mingwX64 klib and link its test binary
         run: >
@@ -169,9 +196,16 @@ jobs:
       - name: Assemble the Android library
         run: ./gradlew --no-daemon :audio-io-kmp:assembleAndroidMain
 
+      - name: Decode signing key
+        run: |
+          echo "${{ secrets.SIGNING_KEY }}" | tr -d ' \n' | base64 -d > "$RUNNER_TEMP/signing-key.gpg"
+
       - name: Publish the Android artifacts to Maven Local
         run: >
           ./gradlew --no-daemon --stacktrace
+          -Psigning.keyId="${{ secrets.SIGNING_KEY_ID }}"
+          -Psigning.secretKeyRingFile="${{ runner.temp }}/signing-key.gpg"
+          -Psigning.password="${{ secrets.SIGNING_PASSWORD }}"
           :audio-io-kmp:publishAndroidPublicationToMavenLocal
           :audio-io-kmp:publishAndroidNativeArm64PublicationToMavenLocal
           :audio-io-kmp:publishAndroidNativeArm32PublicationToMavenLocal
