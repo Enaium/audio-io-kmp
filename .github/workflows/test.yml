@@ -42,6 +42,18 @@ jobs:
           :audio-io-kmp:compileKotlinMacosArm64
           :audio-io-kmp:compileKotlinMacosX64
 
+      # Publishing to the local Maven repository is part of the test: it
+      # exercises every publication (metadata, sources, module, klib) the
+      # release would produce, and the tests below then run against a module
+      # that was packaged exactly once.
+      - name: Publish the macOS artifacts to Maven Local
+        run: >
+          ./gradlew --no-daemon --stacktrace
+          :audio-io-kmp:publishKotlinMultiplatformPublicationToMavenLocal
+          :audio-io-kmp:publishJvmPublicationToMavenLocal
+          :audio-io-kmp:publishMacosArm64PublicationToMavenLocal
+          :audio-io-kmp:publishMacosX64PublicationToMavenLocal
+
       - name: Run JVM tests
         run: ./gradlew --no-daemon :audio-io-kmp:jvmTest
 
@@ -85,6 +97,12 @@ jobs:
           :audio-io-kmp:compileKotlinLinuxX64
           :audio-io-kmp:compileKotlinLinuxArm64
 
+      - name: Publish the Linux artifacts to Maven Local
+        run: >
+          ./gradlew --no-daemon --stacktrace
+          :audio-io-kmp:publishLinuxX64PublicationToMavenLocal
+          :audio-io-kmp:publishLinuxArm64PublicationToMavenLocal
+
       - name: Run JVM tests
         run: ./gradlew --no-daemon :audio-io-kmp:jvmTest
 
@@ -109,6 +127,9 @@ jobs:
 
       # The WASAPI headers and import libraries come from the MinGW sysroot
       # that Kotlin/Native downloads itself, so no extra toolchain is needed.
+      - name: Publish the mingwX64 artifact to Maven Local
+        run: ./gradlew --no-daemon --stacktrace :audio-io-kmp:publishMingwX64PublicationToMavenLocal
+
       - name: Build the mingwX64 klib and link its test binary
         run: >
           ./gradlew --no-daemon --stacktrace
@@ -147,6 +168,15 @@ jobs:
 
       - name: Assemble the Android library
         run: ./gradlew --no-daemon :audio-io-kmp:assembleAndroidMain
+
+      - name: Publish the Android artifacts to Maven Local
+        run: >
+          ./gradlew --no-daemon --stacktrace
+          :audio-io-kmp:publishAndroidPublicationToMavenLocal
+          :audio-io-kmp:publishAndroidNativeArm64PublicationToMavenLocal
+          :audio-io-kmp:publishAndroidNativeArm32PublicationToMavenLocal
+          :audio-io-kmp:publishAndroidNativeX64PublicationToMavenLocal
+          :audio-io-kmp:publishAndroidNativeX86PublicationToMavenLocal
 
       # The example builds libmain.so per ABI and packages it into the APK, so
       # this also verifies the four androidNative link tasks.
