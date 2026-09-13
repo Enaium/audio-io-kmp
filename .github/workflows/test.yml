@@ -1,0 +1,154 @@
+name: Test
+
+"on":
+  workflow_dispatch:
+
+# Builds and tests every platform on a runner that can build it:
+#
+#   macOS ARM64 -> jvm + macosArm64/macosX64 klibs, JVM tests, Core Audio tests,
+#                  the spectrum visualizer example (JVM and macosArm64, headless)
+#   Linux x64   -> linuxX64/linuxArm64 klibs, JVM tests, ALSA tests
+#   Linux x64   -> mingwX64 klib (cross compiled with the Kotlin/Native MinGW
+#                  sysroot, which also provides the WASAPI headers)
+#   Linux x64   -> androidNative klibs (arm64/arm32/x64/x86), the Android AAR
+#                  and the visualizer APK
+#
+# Trigger: run manually from the Actions tab.
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-macos:
+    name: Test macOS ARM64
+    runs-on: macos-14
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Configure JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Build the macOS klibs
+        run: >
+          ./gradlew --no-daemon --stacktrace
+          :audio-io-kmp:compileKotlinMacosArm64
+          :audio-io-kmp:compileKotlinMacosX64
+
+      - name: Run JVM tests
+        run: ./gradlew --no-daemon :audio-io-kmp:jvmTest
+
+      - name: Run Core Audio tests
+        run: ./gradlew --no-daemon :audio-io-kmp:macosArm64Test
+
+      - name: Run the visualizer example (JVM, headless)
+        run: >
+          ./gradlew --no-daemon :examples:audio-visualizer:jvmRun
+          --args="--frames 60"
+
+      - name: Build the visualizer example (macosArm64)
+        run: ./gradlew --no-daemon :examples:audio-visualizer:linkDebugExecutableMacosArm64
+
+  test-linux:
+    name: Test Linux x64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Configure JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # The backend loads libasound at runtime, so the test binary only needs
+      # the shared object to be present on the runner.
+      - name: Install ALSA
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Build the Linux klibs
+        run: >
+          ./gradlew --no-daemon --stacktrace
+          :audio-io-kmp:compileKotlinLinuxX64
+          :audio-io-kmp:compileKotlinLinuxArm64
+
+      - name: Run JVM tests
+        run: ./gradlew --no-daemon :audio-io-kmp:jvmTest
+
+      - name: Run ALSA tests
+        run: ./gradlew --no-daemon :audio-io-kmp:linuxX64Test
+
+  test-windows:
+    name: Test Windows x64 (mingwX64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Configure JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      # The WASAPI headers and import libraries come from the MinGW sysroot
+      # that Kotlin/Native downloads itself, so no extra toolchain is needed.
+      - name: Build the mingwX64 klib and link its test binary
+        run: >
+          ./gradlew --no-daemon --stacktrace
+          :audio-io-kmp:compileKotlinMingwX64
+          :audio-io-kmp:linkDebugTestMingwX64
+
+  test-android:
+    name: Test Android (androidNative + AAR)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Configure JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install the Android platform
+        run: |
+          yes | ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-36" >/dev/null
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      # AAudio is resolved at runtime, the sysroot stub libraries that the
+      # Kotlin/Native Android targets link against ship with Kotlin/Native.
+      - name: Build the androidNative klibs
+        run: >
+          ./gradlew --no-daemon --stacktrace
+          :audio-io-kmp:compileKotlinAndroidNativeArm64
+          :audio-io-kmp:compileKotlinAndroidNativeArm32
+          :audio-io-kmp:compileKotlinAndroidNativeX64
+          :audio-io-kmp:compileKotlinAndroidNativeX86
+
+      - name: Assemble the Android library
+        run: ./gradlew --no-daemon :audio-io-kmp:assembleAndroidMain
+
+      # The example builds libmain.so per ABI and packages it into the APK, so
+      # this also verifies the four androidNative link tasks.
+      - name: Assemble the visualizer APK
+        run: ./gradlew --no-daemon :examples:audio-visualizer:android:assembleDebug

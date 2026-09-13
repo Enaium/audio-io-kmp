@@ -1,0 +1,12 @@
+# Bindings for the Windows Core Audio session API (WASAPI).
+#
+# The headers come from the MinGW sysroot that ships with Kotlin/Native, so the
+# bindings do not depend on a separately installed toolchain. COM interfaces are
+# plain C vtables here (`immdevice.h` and friends expose the `...Vtbl` structs),
+# which is what lets the backend call the methods from Kotlin.
+headers = guiddef.h objbase.h combaseapi.h mmdeviceapi.h audioclient.h audiopolicy.h functiondiscoverykeys_devpkey.h mmreg.h ksmedia.h wasapi_shim.h
+
+# WASAPI lives in ole32 (COM runtime + CoCreateInstance), avrt (MMCSS thread
+# priority) and uuid (interface ids). ksuser is needed for the KSDATAFORMAT
+# sub-format GUIDs used by WAVEFORMATEXTENSIBLE.
+linkerOpts = -lole32 -loleaut32 -luuid -lavrt -lksuser

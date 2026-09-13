@@ -1,0 +1,12 @@
+# Bindings for the AAudio API used by the Android Native backend.
+#
+# The declarations live in aaudio_min.h: AAudio is resolved from libaaudio with
+# dlsym at runtime (see androidNativeMain/AAudio.kt), which also keeps the
+# library working on devices older than Android 8.0 by reporting a clear error
+# instead of failing to load.
+#
+# The 16 KB page size flags are attached here so that every shared object that
+# links this library is compatible with devices that use 16 KB memory pages.
+headers = aaudio_min.h
+
+linkerOpts = -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384

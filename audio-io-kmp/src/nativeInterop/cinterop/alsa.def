@@ -1,0 +1,6 @@
+# Bindings for the ALSA PCM API used by the Linux backend.
+#
+# The declarations live in alsa_min.h: the ALSA entry points are resolved from
+# libasound with dlsym at runtime (see linuxMain/Alsa.kt), so nothing here links
+# against libasound and the klib can be produced on any host.
+headers = alsa_min.h
