@@ -155,8 +155,15 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      # The WASAPI headers and import libraries come from the MinGW sysroot
-      # that Kotlin/Native downloads itself, so no extra toolchain is needed.
+      # The WASAPI headers and import libraries come from the MinGW sysroot that
+      # Kotlin/Native downloads itself. That sysroot carries no import library
+      # for the Core Audio ids, so the cross compiler is installed here to build
+      # the GUID archive the klib embeds (see the module's build script).
+      - name: Install the MinGW cross compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64
+
       - name: Decode signing key
         run: |
           echo "${{ secrets.SIGNING_KEY }}" | tr -d ' \n' | base64 -d > "$RUNNER_TEMP/signing-key.gpg"
@@ -174,6 +181,19 @@ jobs:
           ./gradlew --no-daemon --stacktrace
           :audio-io-kmp:compileKotlinMingwX64
           :audio-io-kmp:linkDebugTestMingwX64
+
+      - name: Verify the GUID archive is embedded
+        # Consumers link against the klib, so the Core Audio GUIDs the sysroot
+        # does not provide have to ride along in it (see wasapi_guids.c).
+        run: |
+          lib=$(find audio-io-kmp/build/classes/kotlin/mingwX64/main/cinterop -name libwasapi_guids.a | head -1)
+          echo "=== $lib ==="
+          if [ -z "$lib" ]; then
+            echo "FAIL: no GUID archive in the wasapi cinterop"
+            exit 1
+          fi
+          nm --defined-only "$lib" | sed -n '/CLSID_MMDeviceEnumerator/p;/IID_IAudioClient/p;/PKEY_Device_FriendlyName/p'
+          echo "OK: $(du -h "$lib" | cut -f1)"
 
       - name: Run JVM tests
         run: ./gradlew --no-daemon :audio-io-kmp:jvmTest

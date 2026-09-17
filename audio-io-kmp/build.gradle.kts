@@ -1,3 +1,4 @@
+import org.gradle.internal.os.OperatingSystem
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
@@ -9,6 +10,61 @@ plugins {
 
 group = rootProject.group
 version = rootProject.version
+
+// ==================== WASAPI GUIDs for the mingwX64 klib ====================
+// wasapi_guids.c defines the Core Audio ids that the MinGW sysroot carries no
+// import library for (see the file); the resulting archive is embedded into the
+// wasapi cinterop below so that consumers of the klib can link.
+//
+// The MinGW cross-compiler is only used for that one file: on hosts without it
+// the klib still builds, with the bindings only.
+fun mingwTool(name: String, plainName: String? = null): String? {
+    val candidates = buildList {
+        System.getenv("PATH")?.split(File.pathSeparator).orEmpty().forEach {
+            add(File(it, name))
+            // On Windows the toolchain is native and has no triple prefix.
+            if (OperatingSystem.current().isWindows && plainName != null) {
+                add(File(it, plainName))
+            }
+        }
+    }
+    return candidates.firstOrNull { it.isFile && it.canExecute() }?.absolutePath
+}
+
+val mingwGcc = mingwTool("x86_64-w64-mingw32-gcc", "gcc")
+val mingwAr = mingwTool("x86_64-w64-mingw32-ar", "ar")
+val wasapiGuidsLibDir = layout.buildDirectory.dir("wasapi-guids")
+
+val compileWasapiGuids = tasks.register<Exec>("compileWasapiGuids") {
+    group = "build"
+    description = "Compiles the WASAPI GUID definitions embedded into the mingwX64 cinterop."
+    onlyIf { mingwGcc != null }
+    val source = file("src/nativeInterop/cinterop/wasapi_guids.c")
+    val objectFile = wasapiGuidsLibDir.get().asFile.resolve("wasapi_guids.o")
+    inputs.file(source)
+    outputs.file(objectFile)
+    doFirst {
+        wasapiGuidsLibDir.get().asFile.mkdirs()
+        commandLine(mingwGcc!!, "-c", source.absolutePath, "-o", objectFile.absolutePath)
+    }
+}
+
+val buildWasapiGuids = tasks.register<Exec>("buildWasapiGuids") {
+    group = "build"
+    description = "Archives the WASAPI GUID definitions embedded into the mingwX64 cinterop."
+    onlyIf { mingwGcc != null && mingwAr != null }
+    dependsOn(compileWasapiGuids)
+    val archive = wasapiGuidsLibDir.get().asFile.resolve("libwasapi_guids.a")
+    outputs.file(archive)
+    doFirst {
+        commandLine(
+            mingwAr!!,
+            "rcs",
+            archive.absolutePath,
+            wasapiGuidsLibDir.get().asFile.resolve("wasapi_guids.o").absolutePath,
+        )
+    }
+}
 
 kotlin {
     // ==================== JVM (desktop) ====================
@@ -92,6 +148,20 @@ kotlin {
                     cinterops.create("wasapi") {
                         defFile(project.file("src/nativeInterop/cinterop/wasapi.def"))
                         includeDirs(project.file("src/nativeInterop/cinterop"))
+                        // The sysroot has no import library for the Core Audio
+                        // ids, so the archive built from wasapi_guids.c rides
+                        // along in the klib.
+                        if (mingwGcc != null && mingwAr != null) {
+                            extraOpts(
+                                "-libraryPath", wasapiGuidsLibDir.get().asFile.absolutePath,
+                                "-staticLibrary", "libwasapi_guids.a",
+                            )
+                        } else {
+                            logger.warn(
+                                "audio-io-kmp: no MinGW cross-compiler on PATH, the wasapi klib gets " +
+                                    "no GUID definitions and consumers will fail to link",
+                            )
+                        }
                     }
                 }
 
@@ -108,6 +178,11 @@ kotlin {
                 }
             }
         }
+    }
+
+    // The wasapi cinterop embeds the GUID archive, so it has to be built first.
+    tasks.matching { it.name == "cinteropWasapiMingwX64" }.configureEach {
+        dependsOn(buildWasapiGuids)
     }
 
     // ==================== Source sets ====================
