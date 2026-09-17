@@ -28,7 +28,7 @@ formats (WAV, MP3, ...) and codecs are out of scope.
 
 ```kotlin
 commonMain.dependencies {
-    implementation("cn.enaium.audio:audio-io-kmp:1.0.0")
+    implementation("cn.enaium.audio:audio-io-kmp:1.0.1")
 }
 ```
 
