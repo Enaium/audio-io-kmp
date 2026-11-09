@@ -26,10 +26,11 @@ import kotlin.time.TimeSource
  * ImGui / ImPlot front end of the visualizer.
  *
  * The left pane configures the capture stream (device, sample rate, sample
- * format, channels and device buffering) and shows the statistics; the right
- * pane stacks the waveform, the spectrum and the waterfall. Everything is drawn
- * from the buffers [SpectrumAnalyzer] keeps up to date, so the window renders
- * even when no capture device could be opened.
+ * format, channels, device buffering and the analysis window), records the
+ * captured audio and plays it back, and shows the statistics; the right pane
+ * stacks the waveform, the spectrum and the waterfall. Everything is drawn from
+ * the buffers [SpectrumAnalyzer] keeps up to date, so the window renders even
+ * when no capture device could be opened.
  */
 class VisualizerUi(
     private val system: AudioSystem?,
@@ -81,8 +82,15 @@ class VisualizerUi(
     /** Set when a control changed something the open stream would not pick up. */
     private var dirty = true
 
-    private val waveform = FloatArray(WAVEFORM_POINTS)
-    private val bins = analyzer.binCount
+    /** Waveform length follows the analysis window. */
+    private var waveform = FloatArray(analyzer.fftSize)
+    private var bins = analyzer.binCount
+
+    /** Playback of the recording; independent of the capture stream. */
+    private val playback = Playback(system)
+
+    private val windowLabels: Array<String> = WINDOW_SIZES.map { it.toString() }.toTypedArray()
+    private val windowIndex = IntArray(1) { WINDOW_SIZES.indexOf(analyzer.fftSize).coerceAtLeast(0) }
     private val heat = FloatArray(WATERFALL_ROWS * WATERFALL_COLUMNS)
     private val waterfall = WaterfallTexture(
         renderer = renderer,
@@ -159,6 +167,7 @@ class VisualizerUi(
     }
 
     override fun close() {
+        playback.close()
         analyzer.close()
         waterfall.close()
     }
@@ -233,6 +242,9 @@ class VisualizerUi(
         if (ImGui.combo("Channels", channelIndex, channelLabels)) dirty = true
         ImGui.setNextItemWidth(160f * uiScale)
         if (ImGui.sliderInt("Buffer frames", bufferFrames, 0, MAX_BUFFER_FRAMES, bufferFormat())) dirty = true
+        ImGui.setNextItemWidth(160f * uiScale)
+        if (ImGui.combo("Window", windowIndex, windowLabels)) applyWindow(WINDOW_SIZES[windowIndex[0]])
+        ImGui.textDisabled("${decimals(windowMillis(), 1)} ms of audio per window")
 
         ImGui.spacing()
         ImGui.beginDisabled(analyzer.isCapturing)
@@ -248,6 +260,42 @@ class VisualizerUi(
         if (ImGui.button("Stop", buttonSize)) analyzer.stopCapture()
         ImGui.endDisabled()
         if (dirty && analyzer.isCapturing) ImGui.textDisabled("stop to apply the changes")
+
+        ImGui.separatorText("Recording")
+        ImGui.beginDisabled(analyzer.format == null)
+        if (ImGui.button(if (analyzer.isRecording) "Stop" else "Record", buttonSize)) {
+            if (analyzer.isRecording) analyzer.stopRecording() else analyzer.startRecording()
+        }
+        ImGui.endDisabled()
+        ImGui.sameLine()
+        ImGui.beginDisabled(analyzer.recordedFrames == 0)
+        if (ImGui.button(if (playback.isPlaying) "Stop" else "Play", buttonSize)) playRecording()
+        ImGui.endDisabled()
+        ImGui.sameLine()
+        ImGui.beginDisabled(analyzer.recordedFrames == 0 || analyzer.isRecording || playback.isPlaying)
+        if (ImGui.button("Clear", ImVec2(70f * uiScale, 0f))) analyzer.clearRecording()
+        ImGui.endDisabled()
+
+        val recorded = "Recorded: ${decimals(analyzer.recordedMillis, 1)} s"
+        if (analyzer.isRecording) ImGui.text("$recorded (recording)")
+        else if (analyzer.recordingFull) ImGui.text("$recorded (full)")
+        else ImGui.text(recorded)
+        if (playback.totalFrames > 0) {
+            val progress = playback.playedFrames.toDouble() / playback.totalFrames
+            val format = playback.format
+            val played = format?.framesToMillis(playback.playedFrames.toInt()) ?: 0.0
+            val total = format?.framesToMillis(playback.totalFrames.toInt()) ?: 0.0
+            ImGui.progressBar(
+                progress.coerceIn(0.0, 1.0).toFloat(),
+                ImVec2(-1f, 0f),
+                "playing ${decimals(played / 1000.0, 1)} / ${decimals(total / 1000.0, 1)} s",
+            )
+        }
+        val playbackError = playback.error
+        if (playbackError != null) {
+            ImGui.textColored(ERROR_COLOR, "Playback error")
+            ImGui.textWrapped(playbackError)
+        }
 
         ImGui.separatorText("Waterfall")
         ImGui.setNextItemWidth(160f * uiScale)
@@ -286,6 +334,7 @@ class VisualizerUi(
         ImGui.progressBar(analyzer.rms, ImVec2(-1f, 0f), "rms ${decimals(analyzer.rms.toDouble(), 3)}")
         ImGui.text("Peak: ${decimals(db(analyzer.peak), 1)} dBFS")
         ImGui.text("RMS: ${decimals(db(analyzer.rms), 1)} dBFS")
+        ImGui.text("Window: ${analyzer.fftSize} frames (${decimals(windowMillis(), 1)} ms)")
         ImGui.text("FFT: ${analyzer.fftSize} points, $bins bins")
     }
 
@@ -374,6 +423,44 @@ class VisualizerUi(
         }
     }
 
+    /**
+     * Applies a new analysis window to the waveform, the FFT and the level
+     * meters. The capture stream keeps running; only the analysis state is
+     * rebuilt.
+     */
+    private fun applyWindow(frames: Int) {
+        analyzer.setWindow(frames)
+        waveform = FloatArray(analyzer.fftSize)
+        bins = analyzer.binCount
+    }
+
+    /** Starts playing the recording, or stops a playback in progress. */
+    private fun playRecording() {
+        if (playback.isPlaying) {
+            playback.stop()
+            return
+        }
+        val recorded = analyzer.recordedFormat ?: return
+        val frames = analyzer.recordedFrames
+        if (frames <= 0) return
+        // Freeze the recording so the snapshot and the length agree.
+        analyzer.stopRecording()
+        // Played back in the format it was captured in: the float snapshot is
+        // converted back to that sample format while writing.
+        val samples = analyzer.recordedSnapshot()
+        val format = recorded
+        if (playback.start(format, samples, frames)) {
+            println("Playback: $format, $frames frames (${decimals(recorded.framesToMillis(frames), 1)} ms)")
+        }
+    }
+
+    /** Duration of one analysis window at the stream or selected sample rate. */
+    private fun windowMillis(): Double {
+        val rate = analyzer.sampleRate.takeIf { it > 0 }
+            ?: rates.getOrElse(rateIndex[0]) { PREFERRED_SAMPLE_RATE }
+        return analyzer.fftSize * 1000.0 / rate
+    }
+
     private fun captureState(): String = when {
         analyzer.isCapturing -> "capturing"
         analyzer.format != null -> "stopped"
@@ -395,7 +482,6 @@ class VisualizerUi(
     private companion object {
         const val WINDOW_TITLE = "Audio Spectrum Visualizer"
         const val CONTROLS_WIDTH = 300f
-        const val WAVEFORM_POINTS = 512
         const val WATERFALL_ROWS = 64
 
         /**
@@ -422,6 +508,9 @@ class VisualizerUi(
                 ImGuiWindowFlags.NO_COLLAPSE or
                 ImGuiWindowFlags.NO_BRING_TO_FRONT_ON_FOCUS
 
+
+        /** Analysis window choices of the waveform and the FFT, in frames. */
+        val WINDOW_SIZES = listOf(256, 512, 1024, 2048, 4096, 8192, 16384)
 
         val DEFAULT_SAMPLE_RATES = listOf(8000, 16000, 22050, 32000, 44100, 48000, 88200, 96000, 192000)
         val DEFAULT_CHANNELS = listOf(1, 2)

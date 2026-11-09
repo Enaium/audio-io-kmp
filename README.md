@@ -211,7 +211,8 @@ backend itself and its wake-up signal.
 
 `examples/audio-visualizer` captures from the default input and draws a
 waveform, a live spectrum and a waterfall spectrogram with Dear ImGui and
-ImPlot, with device/format selection and level meters:
+ImPlot, with device/format selection, an adjustable analysis window, level
+meters, and recording of the captured audio for playback:
 
 ```shell
 ./gradlew :examples:audio-visualizer:jvmRun            # JVM desktop
@@ -239,6 +240,15 @@ the SDL window on every resize.
 
 The draw data is handed to imgui-kmp's SDL renderer backend, which copies only
 the vertices each draw command references.
+
+The analysis window is selectable from 256 to 16384 frames. It is the FFT
+length, the span of the waveform and the time the level meters average over;
+changing it rebuilds that state only, so a running capture keeps going. The
+record button keeps up to 30 seconds of the captured audio in memory (bounded
+to 16 MiB of float samples) and the play button plays it back through the
+default output in the format it was recorded with. `write` returns once the
+frames are queued, so the playback waits one device buffer before it releases
+the stream and the last frames are still heard.
 
 The waterfall is drawn as a 128 x 64 texture rather than as an ImPlot heatmap.
 A heatmap cell costs four vertices in the render backend, which for a

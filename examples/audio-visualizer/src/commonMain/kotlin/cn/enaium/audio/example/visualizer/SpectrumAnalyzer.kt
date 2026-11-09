@@ -32,16 +32,27 @@ import kotlin.time.TimeSource
  */
 class SpectrumAnalyzer(
     private val system: AudioSystem?,
-    /** FFT length in frames; must be a power of two. */
-    val fftSize: Int = DEFAULT_FFT_SIZE,
+    /** Initial analysis window in frames; must be a power of two. */
+    initialWindow: Int = DEFAULT_FFT_SIZE,
 ) {
 
     init {
-        require(Fft.isPowerOfTwo(fftSize) && fftSize >= 2) { "fftSize must be a power of two >= 2: $fftSize" }
+        require(Fft.isPowerOfTwo(initialWindow) && initialWindow >= MIN_WINDOW) {
+            "the window must be a power of two >= $MIN_WINDOW: $initialWindow"
+        }
     }
 
+    /**
+     * Frames of the analysis window: the FFT length, the length of [waveform]
+     * and the span [peak] and [rms] are measured over. Changed through
+     * [setWindow].
+     */
+    var fftSize: Int = initialWindow
+        private set
+
     /** Bins [spectrum] reports, `fftSize / 2`. */
-    val binCount: Int = Fft.binCount(fftSize)
+    var binCount: Int = Fft.binCount(initialWindow)
+        private set
 
     // ==================== capture stream (UI thread) ====================
 
@@ -66,13 +77,36 @@ class SpectrumAnalyzer(
     // ==================== analysis (UI thread) ====================
 
     /** Frames of mono history kept for the waveform and the FFT window. */
-    private val historyFrames: Int = maxOf(fftSize, MIN_HISTORY_FRAMES)
-    private val history = FloatArray(historyFrames)
+    private var historyFrames: Int = maxOf(fftSize, MIN_HISTORY_FRAMES)
+    private var history = FloatArray(historyFrames)
     private var historyWrite = 0L
-    private val window = Fft.hannWindow(fftSize)
-    private val scratch = FloatArray(2 * fftSize)
-    private val samples = FloatArray(fftSize)
-    private val bins = FloatArray(binCount)
+    private var window = Fft.hannWindow(fftSize)
+    private var scratch = FloatArray(2 * fftSize)
+    private var samples = FloatArray(fftSize)
+    private var bins = FloatArray(binCount)
+
+    /**
+     * Changes the analysis window. The FFT, the waveform and the level meters
+     * are rebuilt for [frames]; the open stream and its ring buffer are kept,
+     * so a capture keeps running across the change.
+     *
+     * @param frames window length in frames, a power of two >= [MIN_WINDOW].
+     */
+    fun setWindow(frames: Int) {
+        require(Fft.isPowerOfTwo(frames) && frames >= MIN_WINDOW) {
+            "the window must be a power of two >= $MIN_WINDOW: $frames"
+        }
+        if (frames == fftSize) return
+        fftSize = frames
+        binCount = Fft.binCount(frames)
+        historyFrames = maxOf(frames, MIN_HISTORY_FRAMES)
+        history = FloatArray(historyFrames)
+        window = Fft.hannWindow(frames)
+        scratch = FloatArray(2 * frames)
+        samples = FloatArray(frames)
+        bins = FloatArray(binCount)
+        resetAnalysis()
+    }
 
     /** Highest absolute sample of the last analysed window. */
     var peak: Float = 0f
@@ -117,6 +151,33 @@ class SpectrumAnalyzer(
     /** Frames currently waiting in the ring for [update]. */
     val bufferedFrames: Int get() = ring?.availableToRead ?: 0
 
+    // ==================== recording (UI thread) ====================
+
+    /**
+     * `true` while [update] appends the frames it drains to the recording.
+     * Only the UI thread reads or writes the recording, the capture thread
+     * never touches it.
+     */
+    var isRecording: Boolean = false
+        private set
+
+    /** Format the recording was captured with, `null` while nothing is recorded. */
+    var recordedFormat: AudioFormat? = null
+        private set
+
+    /** Frames in the recording. */
+    val recordedFrames: Int get() = recordedFrameCount
+
+    /** Duration of the recording. */
+    val recordedMillis: Double get() = recordedFormat?.framesToMillis(recordedFrameCount) ?: 0.0
+
+    /** `true` when the recording hit its limit and stopped by itself. */
+    val recordingFull: Boolean get() = recordedCapacityFrames > 0 && recordedFrameCount >= recordedCapacityFrames
+
+    private var recordedFrameCount = 0
+    private var recordedCapacityFrames = 0
+    private var recorded = FloatArray(0)
+
     @Volatile
     private var captureRequested = false
 
@@ -150,6 +211,9 @@ class SpectrumAnalyzer(
             readBuffer = AudioBuffer(stream.format, minOf(maxOf(stream.bufferFrames, fftSize), ringFrames))
             input = stream
             error = null
+            // The recording is interleaved with the stream's channel count, so
+            // a new stream invalidates it.
+            clearRecording()
             resetAnalysis()
             true
         } catch (e: Exception) {
@@ -296,9 +360,61 @@ class SpectrumAnalyzer(
             history[(historyWrite % historyFrames).toInt()] = sum / channels
             historyWrite++
         }
+        if (isRecording) appendToRecording(frames)
         measureLevels()
         analyze()
         return frames
+    }
+
+    /**
+     * Starts recording into a buffer of up to [MAX_RECORD_SECONDS] seconds (and
+     * [MAX_RECORD_SAMPLES] samples) at the open stream's rate. What was recorded
+     * before is discarded.
+     *
+     * @return `false` (and fills [error]) when no stream is open.
+     */
+    fun startRecording(): Boolean {
+        val format = format ?: return fail("no capture stream is open")
+        val byTime = format.millisToFrames(MAX_RECORD_SECONDS * 1000.0)
+        val byMemory = MAX_RECORD_SAMPLES / format.channelCount
+        recordedCapacityFrames = minOf(byTime, byMemory).coerceAtLeast(1)
+        recordedFrameCount = 0
+        val samples = recordedCapacityFrames * format.channelCount
+        if (recorded.size < samples) recorded = FloatArray(samples)
+        recordedFormat = format
+        isRecording = true
+        return true
+    }
+
+    /** Stops appending to the recording; what was recorded stays available. */
+    fun stopRecording() {
+        isRecording = false
+    }
+
+    /** Discards the recording. */
+    fun clearRecording() {
+        isRecording = false
+        recordedFrameCount = 0
+        recordedCapacityFrames = 0
+        recordedFormat = null
+    }
+
+    /**
+     * A copy of the recorded frames as interleaved floats in `-1..1`. Played
+     * back as `PCM_F32` with the channel count and rate of [recordedFormat].
+     */
+    fun recordedSnapshot(): FloatArray {
+        val channels = recordedFormat?.channelCount ?: 1
+        return recorded.copyOf(recordedFrameCount * channels)
+    }
+
+    private fun appendToRecording(frames: Int) {
+        val channels = recordedFormat?.channelCount ?: return
+        val take = minOf(frames, recordedCapacityFrames - recordedFrameCount)
+        if (take <= 0) return
+        drainScratch.copyInto(recorded, recordedFrameCount * channels, 0, take * channels)
+        recordedFrameCount += take
+        if (recordedFrameCount >= recordedCapacityFrames) isRecording = false
     }
 
     private fun consumeIdle(): Int {
@@ -369,8 +485,17 @@ class SpectrumAnalyzer(
     }
 
     companion object {
-        /** FFT length used by the example: 1024 frames at 48 kHz is ~21 ms. */
+        /** Analysis window the example opens with: 1024 frames at 48 kHz is ~21 ms. */
         const val DEFAULT_FFT_SIZE: Int = 1024
+
+        /** Shortest analysis window, four times the waveform resolution of the UI. */
+        const val MIN_WINDOW: Int = 64
+
+        /** Longest recording in seconds. */
+        const val MAX_RECORD_SECONDS: Double = 30.0
+
+        /** Upper bound of the recording memory: 16 MiB of float samples. */
+        const val MAX_RECORD_SAMPLES: Int = 4 * 1024 * 1024
 
         /** Ring capacity in frames; several FFT windows so UI hiccups are absorbed. */
         private const val RING_FRAMES: Int = 8192
