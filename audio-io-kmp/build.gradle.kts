@@ -2,6 +2,9 @@ import org.gradle.internal.os.OperatingSystem
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
+import org.jetbrains.kotlin.gradle.targets.js.nodejs.NodeJsEnvSpec
+import org.jetbrains.kotlin.gradle.targets.js.nodejs.NodeJsPlugin
+
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.android.kmp.library)
@@ -108,6 +111,19 @@ kotlin {
     androidNativeX64()
     androidNativeX86()
 
+    // ==================== Web ====================
+    // Both web runtimes drive the same Web Audio backend: the browser entry
+    // point, the capture/playback streams and the format handling live in
+    // src/webMain, only the JS interop declarations differ per runtime.
+    js(IR) {
+        browser()
+        nodejs()
+    }
+    wasmJs {
+        browser()
+        nodejs()
+    }
+
     // ==================== Per-target sources and cinterop ====================
     // There is no hierarchy template: every native target compiles the shared
     // src/nativeMain plus the directories of the OS family it belongs to.
@@ -187,6 +203,23 @@ kotlin {
 
     // ==================== Source sets ====================
     sourceSets {
+        // No hierarchy template on this project, so the intermediate web source
+        // set that both web targets share is wired by hand.
+        val webMain by creating {
+            dependsOn(getByName("commonMain"))
+        }
+        val jsMain by getting {
+            dependsOn(webMain)
+        }
+        val wasmJsMain by getting {
+            dependsOn(webMain)
+            dependencies {
+                // Typed arrays (Float32Array) are part of the Kotlin/JS stdlib
+                // but not of Kotlin/Wasm.
+                implementation(libs.kotlinx.browser)
+            }
+        }
+
         commonTest {
             dependencies {
                 implementation(libs.kotlin.test)
@@ -218,7 +251,7 @@ mavenPublishing {
         description.set(
             "Kotlin Multiplatform audio I/O: configurable PCM capture and playback on the JVM " +
                     "(javax.sound), Android (AudioRecord/AudioTrack), Android Native (AAudio), " +
-                    "Windows (WASAPI), Linux (ALSA) and macOS (Core Audio).",
+                    "Windows (WASAPI), Linux (ALSA), macOS (Core Audio) and the browser (Web Audio).",
         )
         url.set("https://github.com/Enaium/audio-io-kmp")
         inceptionYear.set("2026")
@@ -248,4 +281,11 @@ mavenPublishing {
             url.set("https://github.com/Enaium/audio-io-kmp/issues")
         }
     }
+}
+
+// The Kotlin web toolchain wants to fetch its Node build from a repository this
+// project does not resolve from. The Node on PATH (every CI image and developer
+// machine has one) is used instead.
+plugins.withType<NodeJsPlugin> {
+    the<NodeJsEnvSpec>().download = false
 }

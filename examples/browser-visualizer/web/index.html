@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>audio-io-kmp browser visualizer</title>
+    <style>
+        :root {
+            color-scheme: dark;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html, body {
+            margin: 0;
+            height: 100%;
+            overflow: hidden;
+            background: #121218;
+            color: #d7dce8;
+            font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        }
+
+        #canvas {
+            position: fixed;
+            inset: 0;
+            display: block;
+        }
+
+        #controls {
+            position: fixed;
+            top: 16px;
+            left: 16px;
+            width: 264px;
+            padding: 14px;
+            border: 1px solid #2b3040;
+            border-radius: 10px;
+            background: rgba(22, 24, 32, 0.92);
+            backdrop-filter: blur(6px);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        #controls h1 {
+            margin: 0;
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            color: #9aa3b8;
+        }
+
+        .row {
+            display: flex;
+            gap: 8px;
+        }
+
+        button {
+            flex: 1;
+            padding: 7px 8px;
+            border: 1px solid #39415a;
+            border-radius: 7px;
+            background: #1d2130;
+            color: #d7dce8;
+            font: inherit;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            border-color: #4f5a7d;
+        }
+
+        button.active {
+            border-color: #59d9ff;
+            color: #59d9ff;
+        }
+
+        label {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            font-size: 12px;
+            color: #9aa3b8;
+        }
+
+        select {
+            flex: 1;
+            padding: 5px 6px;
+            border: 1px solid #39415a;
+            border-radius: 6px;
+            background: #1d2130;
+            color: #d7dce8;
+            font: inherit;
+            font-size: 12px;
+        }
+
+        #status {
+            min-height: 30px;
+            font-size: 11px;
+            line-height: 1.4;
+            color: #8b93a7;
+        }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="controls">
+    <h1>audio-io-kmp · Web Audio</h1>
+    <div class="row">
+        <button id="start">Start audio</button>
+        <button id="record">Record</button>
+        <button id="play">Play</button>
+    </div>
+    <div class="row">
+        <button id="clear">Clear waterfall</button>
+    </div>
+    <label>
+        Window
+        <select id="window">
+            <option value="256">256</option>
+            <option value="512">512</option>
+            <option value="1024" selected>1024</option>
+            <option value="2048">2048</option>
+            <option value="4096">4096</option>
+            <option value="8192">8192</option>
+            <option value="16384">16384</option>
+        </select>
+    </label>
+    <div id="status">loading…</div>
+</div>
+
+<!-- The Web Audio glue of the library: defines the audioIo_* functions the
+     backend's JavaScript interop calls. -->
+<script src="audio-io-kmp-web.js"></script>
+<!-- Page controls, frame loop and canvas drawing. -->
+<script src="page.js"></script>
+<!-- The Kotlin/Wasm module: runs main(), which starts the frame loop. -->
+<script src="browser-visualizer.js"></script>
+</body>
+</html>

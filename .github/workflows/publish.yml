@@ -66,7 +66,7 @@ jobs:
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
 
   publish-linux:
-    name: Publish Linux (linuxX64/linuxArm64 klibs)
+    name: Publish Linux (linuxX64/linuxArm64 klibs) and the web klibs and the web klibs
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -94,6 +94,8 @@ jobs:
           -Psigning.password="${{ secrets.SIGNING_PASSWORD }}"
           :audio-io-kmp:publishLinuxX64PublicationToMavenCentralRepository
           :audio-io-kmp:publishLinuxArm64PublicationToMavenCentralRepository
+          :audio-io-kmp:publishJsPublicationToMavenCentralRepository
+          :audio-io-kmp:publishWasmJsPublicationToMavenCentralRepository
           --continue
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}

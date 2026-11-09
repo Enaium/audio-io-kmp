@@ -20,9 +20,38 @@ implemented on top of its own native audio API behind that API.
 | Linux ARM64          | `linuxArm64`                                       | ALSA                         |
 | macOS ARM64          | `macosArm64`                                       | Core Audio (Audio Queue)     |
 | macOS x86_64         | `macosX64`                                         | Core Audio (Audio Queue)     |
+| Browser (Wasm)       | `wasmJs`                                          | Web Audio                    |
+| Browser (JS)         | `js`                                              | Web Audio                    |
 
 Audio is always interleaved, little-endian PCM. Raw streams only: container
 formats (WAV, MP3, ...) and codecs are out of scope.
+
+## Web targets
+
+The browser backends run on the Web Audio API and share one implementation:
+the Kotlin side only declares the `audioIo_*` functions, the audio graph and
+its ring buffers live in a small JavaScript glue that the page loads before the
+module starts.
+
+```html
+<script src="audio-io-kmp-web.js"></script>
+<script src="my-app.js"></script>
+```
+
+`audio-io-kmp-web.js` ships in `audio-io-kmp/src/webMain/resources`; copy it
+next to the page (or import it from the bundler) and load it first. Without it
+the `audioIo_*` globals do not exist and the browser backend fails on the first
+call.
+
+The page drives the clock, so the browser streams cannot block the thread that
+created them: `read` returns whatever the capture callback buffered (`0` when
+nothing arrived yet) and `write` accepts what the playback ring has room for.
+Poll them from your render loop or animation frame; `read` only returns `-1`
+once the stream was stopped. The sample rate has to match the `AudioContext`
+rate — a browser that cannot create the context at the requested rate makes
+`openInput` / `openOutput` throw. Capture starts from a user gesture (the
+browser's autoplay and permission rules), which the example does with its
+Start button.
 
 ## Dependency
 
@@ -199,8 +228,12 @@ audio-io-kmp/                       the library
   src/linuxMain                     ALSA backend
   src/mingwMain                     WASAPI backend
   src/androidNativeMain             AAudio backend
+  src/webMain                       Web Audio backend (shared by both web targets)
+  src/jsMain / src/wasmJsMain       the audioIo_* interop declarations
+  src/webMain/resources             audio-io-kmp-web.js, the Web Audio glue
   src/nativeInterop/cinterop        cinterop definitions (ALSA, WASAPI, AAudio)
 examples/audio-visualizer/          Dear ImGui + ImPlot spectrum visualizer
+examples/browser-visualizer/        the same visualizer as a web page (Kotlin/Wasm)
 ```
 
 The native targets compile `src/nativeMain` plus the directory of their OS
@@ -287,3 +320,21 @@ manually from the Actions tab.
 ## License
 
 MIT
+
+## Browser example
+
+`examples/browser-visualizer` is the same visualizer as a web page: Kotlin/Wasm
+draws through the Web Audio backend and a small page glue, with the waveform,
+the spectrum and a scrolling waterfall on a canvas and the same controls (start,
+record, play, clear, analysis window).
+
+```shell
+./gradlew :examples:browser-visualizer:browserApp   # builds build/browserApp
+python3 -m http.server 8080 -d examples/browser-visualizer/build/browserApp
+# open http://localhost:8080
+```
+
+The page has to be served over `http://localhost` (or HTTPS): the microphone is
+only available in a secure context. `browserApp` assembles the wasm bundle, the
+page glue and the library's Web Audio glue into one directory; the module also
+depends on `kotlinx-browser` for the DOM and typed arrays.
