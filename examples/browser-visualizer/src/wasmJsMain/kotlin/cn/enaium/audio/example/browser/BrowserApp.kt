@@ -13,7 +13,6 @@ import org.khronos.webgl.set
 import kotlin.math.abs
 import kotlin.math.log10
 import kotlin.math.round
-import kotlin.math.sqrt
 import kotlin.time.TimeSource
 
 /**
