@@ -283,6 +283,17 @@ internal class AudioQueueOutput(
                     closeDevice()
                     throw AudioException("AudioQueueAllocateBuffer failed with status $status")
                 }
+                // An output buffer has to carry its size and data before it is
+                // enqueued: a zero sized buffer plays nothing, and the queue
+                // never asks for more. The first buffers are silence until the
+                // callbacks fill them from the ring.
+                buffer.value?.pointed?.let { pointed ->
+                    val data = pointed.mAudioData
+                    if (data != null) {
+                        ring.readSilence(data.reinterpret(), framesPerBuffer)
+                        pointed.mAudioDataByteSize = bytes
+                    }
+                }
                 AudioQueueEnqueueBuffer(queue, buffer.value, 0u, null)
             }
         }

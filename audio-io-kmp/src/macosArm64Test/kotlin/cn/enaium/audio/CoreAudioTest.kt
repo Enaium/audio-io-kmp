@@ -4,6 +4,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 
 /**
  * Exercises the Core Audio backend against whatever device the machine has.
@@ -74,6 +76,40 @@ class CoreAudioTest {
                 assertTrue(output.available() >= 0, "the free space is never negative")
             }
             assertEquals(AudioState.CLOSED, output.state)
+        } finally {
+            system.close()
+        }
+    }
+
+    /**
+     * Writing more than the stream buffers internally only completes when the
+     * queue keeps asking for buffers; a queue that never calls back would stall
+     * here instead of playing.
+     */
+    @Test
+    fun playbackDrainsTheRingThroughTheDevice() {
+        val system = audioSystem()
+        try {
+            val format = AudioFormat(48000, 1, SampleFormat.PCM_S16)
+            val output = try {
+                system.openOutput(format, bufferFrames = 480)
+            } catch (e: AudioException) {
+                println("no playback device on this machine: ${e.message}")
+                return
+            }
+            output.use {
+                output.start()
+                val chunk = AudioBuffer(format, 480).apply { frameCount = 480 }
+                // One second of audio, far more than the stream buffers.
+                val target = format.sampleRate
+                var written = 0
+                val deadline = TimeSource.Monotonic.markNow() + 10.seconds
+                while (written < target && deadline.hasNotPassedNow()) {
+                    written += output.writeNonBlocking(chunk)
+                    if (written < target) platform.posix.usleep(2000u)
+                }
+                assertEquals(target, written, "the device keeps consuming the queued frames")
+            }
         } finally {
             system.close()
         }
