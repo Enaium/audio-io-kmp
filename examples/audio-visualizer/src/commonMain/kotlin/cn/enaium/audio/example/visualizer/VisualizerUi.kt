@@ -248,7 +248,7 @@ class VisualizerUi(
 
         ImGui.spacing()
         ImGui.beginDisabled(analyzer.isCapturing)
-        if (ImGui.button("Start", buttonSize)) {
+        if (ImGui.button("Start##capture", buttonSize)) {
             // Retries the open when there is nothing live, so a device that
             // appeared after launch can still be picked up.
             if (dirty || analyzer.format == null) applySelection()
@@ -257,23 +257,25 @@ class VisualizerUi(
         ImGui.endDisabled()
         ImGui.sameLine()
         ImGui.beginDisabled(!analyzer.isCapturing)
-        if (ImGui.button("Stop", buttonSize)) analyzer.stopCapture()
+        if (ImGui.button("Stop##capture", buttonSize)) analyzer.stopCapture()
         ImGui.endDisabled()
         if (dirty && analyzer.isCapturing) ImGui.textDisabled("stop to apply the changes")
 
         ImGui.separatorText("Recording")
         ImGui.beginDisabled(analyzer.format == null)
-        if (ImGui.button(if (analyzer.isRecording) "Stop" else "Record", buttonSize)) {
+        val recordLabel = if (analyzer.isRecording) "Stop##record" else "Record"
+        if (ImGui.button(recordLabel, buttonSize)) {
             if (analyzer.isRecording) analyzer.stopRecording() else analyzer.startRecording()
         }
         ImGui.endDisabled()
         ImGui.sameLine()
         ImGui.beginDisabled(analyzer.recordedFrames == 0)
-        if (ImGui.button(if (playback.isPlaying) "Stop" else "Play", buttonSize)) playRecording()
+        val playLabel = if (playback.isPlaying) "Stop##play" else "Play"
+        if (ImGui.button(playLabel, buttonSize)) playRecording()
         ImGui.endDisabled()
         ImGui.sameLine()
         ImGui.beginDisabled(analyzer.recordedFrames == 0 || analyzer.isRecording || playback.isPlaying)
-        if (ImGui.button("Clear", ImVec2(70f * uiScale, 0f))) analyzer.clearRecording()
+        if (ImGui.button("Clear##recording", ImVec2(70f * uiScale, 0f))) analyzer.clearRecording()
         ImGui.endDisabled()
 
         val recorded = "Recorded: ${decimals(analyzer.recordedMillis, 1)} s"
@@ -305,7 +307,7 @@ class VisualizerUi(
             waterfallDirty = true
         }
         ImGui.checkbox("Freeze", freezeWaterfall)
-        if (ImGui.button("Clear", buttonSize)) {
+        if (ImGui.button("Clear##waterfall", buttonSize)) {
             heat.fill(Fft.MIN_DB)
             waterfallDirty = true
             freezeWaterfall[0] = false
