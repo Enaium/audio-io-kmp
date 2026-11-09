@@ -15,6 +15,11 @@
  * converts them to the stream's PCM format. Capture and playback run on the
  * page's thread (ScriptProcessorNode), which is also where the Kotlin code
  * runs, so no locking is needed anywhere.
+ *
+ * Both rings hold a second of audio. The page polls them once per animation
+ * frame, and a frame that takes longer than the ring (a slow canvas, a tab
+ * that was just shown again) must not lose captured frames or starve the
+ * playback, which is what a few milliseconds of ring would do.
  */
 (function () {
     if (globalThis.audioIo_deviceCount) return;
@@ -105,6 +110,11 @@
         return entry ? entry.ctx.sampleRate | 0 : 0;
     };
 
+    /** Frames both rings hold: one second of the context's rate, at least four blocks. */
+    function ringFrames(ctx, block) {
+        return Math.max(block * 4, Math.round(ctx.sampleRate));
+    }
+
     /** ScriptProcessorNode only takes powers of two between 256 and 16384. */
     function blockSize(frames) {
         var wanted = frames > 0 ? frames : 1024;
@@ -153,7 +163,7 @@
             }
             var size = blockSize(frames);
             entry.block = size;
-            capture.ring = new Float32Array(size * 4 * channels);
+            capture.ring = new Float32Array(ringFrames(entry.ctx, size) * channels);
             capture.capacity = capture.ring.length / channels;
             capture.stream = stream;
             capture.source = entry.ctx.createMediaStreamSource(stream);
@@ -229,7 +239,13 @@
         closePlayback(entry);
         var size = blockSize(frames);
         entry.block = size;
-        var playback = { channels: channels, ring: new Float32Array(size * 4 * channels), read: 0, write: 0, underruns: 0 };
+        var playback = {
+            channels: channels,
+            ring: new Float32Array(ringFrames(entry.ctx, size) * channels),
+            read: 0,
+            write: 0,
+            underruns: 0
+        };
         playback.capacity = playback.ring.length / channels;
         playback.node = entry.ctx.createScriptProcessor(size, 1, channels);
         playback.node.onaudioprocess = function (event) {

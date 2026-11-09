@@ -48,6 +48,7 @@ internal class BrowserApp {
     private var playbackBuffer: AudioBuffer? = null
     private var playbackOffset = 0
     private var playbackChannels = 1
+    private var playbackDoneMark: TimeSource.Monotonic.ValueTimeMark? = null
 
     // ==================== analysis ====================
 
@@ -151,6 +152,7 @@ internal class BrowserApp {
     }
 
     private var floats = FloatArray(0)
+
     private var capturedSinceMark = 0L
     private var capturedFrames = 0L
     private var captureRate = 0.0
@@ -269,9 +271,11 @@ internal class BrowserApp {
             playbackOffset += accepted
             written++
         }
-        // The ring is empty again once the device took everything.
-        if (playbackOffset >= recordedFrames && stream.available() >= stream.bufferFrames) {
-            stopPlayback()
+        // The ring holds about a second of audio, so the playback is only
+        // really over once the last second had time to play.
+        if (playbackOffset >= recordedFrames) {
+            val mark = playbackDoneMark ?: TimeSource.Monotonic.markNow().also { playbackDoneMark = it }
+            if (mark.elapsedNow().inWholeMilliseconds >= PLAYBACK_TAIL_MILLIS) stopPlayback()
         }
     }
 
@@ -281,6 +285,7 @@ internal class BrowserApp {
         playbackBuffer = null
         playbackChannels = 1
         playbackOffset = 0
+        playbackDoneMark = null
         runCatching { stream.close() }
         webApp_setPlayback(false)
     }
@@ -394,9 +399,12 @@ internal class BrowserApp {
         const val MAX_WINDOW = 16384
         const val MAX_RECORD_SECONDS = 30
         const val MAX_RECORD_SAMPLES = 4 * 1024 * 1024
-        const val MAX_BLOCKS_PER_FRAME = 32
+        const val MAX_BLOCKS_PER_FRAME = 64
         const val PANEL_WIDTH = 280f
         const val WATERFALL_INTERVAL = 40L
+
+        /** How long the ring may still hold audio after the last frame was written. */
+        const val PLAYBACK_TAIL_MILLIS = 1100L
         const val STATUS_INTERVAL = 250L
 
         const val COMMAND_START = 1

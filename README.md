@@ -47,7 +47,9 @@ The page drives the clock, so the browser streams cannot block the thread that
 created them: `read` returns whatever the capture callback buffered (`0` when
 nothing arrived yet) and `write` accepts what the playback ring has room for.
 Poll them from your render loop or animation frame; `read` only returns `-1`
-once the stream was stopped. The sample rate has to match the `AudioContext`
+once the stream was stopped. Both directions buffer a second of audio, so a
+frame that takes longer than a few milliseconds — a slow canvas, a tab that was
+just shown again — neither drops captured frames nor starves the playback. The sample rate has to match the `AudioContext`
 rate — a browser that cannot create the context at the requested rate makes
 `openInput` / `openOutput` throw. Capture starts from a user gesture (the
 browser's autoplay and permission rules), which the example does with its
