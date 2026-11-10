@@ -38,9 +38,19 @@ module starts.
 <script src="my-app.js"></script>
 ```
 
-`audio-io-kmp-web.js` ships in `audio-io-kmp/src/webMain/resources`; copy it
-next to the page (or import it from the bundler) and load it first. Without it
-the `audioIo_*` globals do not exist and the browser backend fails on the first
+The glue is published as the `@enaium/audio-io-kmp` npm package (its source
+lives in `audio-io-kmp/src/webMain/resources`), so a web app installs it like
+any other dependency and loads it first:
+
+```shell
+npm i @enaium/audio-io-kmp
+```
+
+```html
+<script src="node_modules/@enaium/audio-io-kmp/audio-io-kmp-web.js"></script>
+```
+
+or `import "@enaium/audio-io-kmp"` from the page's module. Without it the `audioIo_*` globals do not exist and the browser backend fails on the first
 call.
 
 The page drives the clock, so the browser streams cannot block the thread that

@@ -289,3 +289,101 @@ mavenPublishing {
 plugins.withType<NodeJsPlugin> {
     the<NodeJsEnvSpec>().download = false
 }
+
+// ==================== wasm/js: npm package ====================
+// The web backends only declare the audioIo_* functions; the Web Audio graph
+// and its ring buffers live in audio-io-kmp-web.js. Web pages need that file
+// next to the Kotlin module, so it ships as an npm package
+// (@enaium/audio-io-kmp) that the page loads before the module starts,
+// instead of an asset inside a Maven jar.
+val webNpmDir = layout.buildDirectory.dir("npm").get().asFile
+val webGlue = project.file("src/webMain/resources/audio-io-kmp-web.js")
+val webNpmVersion: String = version.toString()
+
+tasks.register("assembleWebNpm") {
+    group = "build"
+    description = "Stages the @enaium/audio-io-kmp npm package in build/npm."
+    inputs.file(webGlue)
+    inputs.property("npmPackageVersion", webNpmVersion)
+    outputs.dir(webNpmDir)
+    doLast {
+        webNpmDir.deleteRecursively()
+        webNpmDir.mkdirs()
+        webGlue.copyTo(webNpmDir.resolve("audio-io-kmp-web.js"), overwrite = true)
+        webNpmDir.resolve("README.md").writeText(
+            """
+            # @enaium/audio-io-kmp
+
+            Web Audio glue for the `audio-io-kmp` browser backend (the `js` and
+            `wasmJs` targets). Load it before the Kotlin/Wasm or Kotlin/JS module;
+            it defines the `audioIo_*` functions the backend calls.
+
+            ```html
+            <script src="audio-io-kmp-web.js"></script>
+            ```
+
+            or import it for its side effects from a bundler:
+
+            ```js
+            import "@enaium/audio-io-kmp";
+            ```
+
+            Capture and playback run on the page's thread, so the streams are
+            polled: `read` returns what the capture callback buffered (0 when
+            nothing yet) and `write` accepts what the playback ring has room for.
+            Both directions keep a second of audio, so a slow frame neither drops
+            captured frames nor starves the playback.
+
+            https://github.com/Enaium/audio-io-kmp
+            """.trimIndent() + "\n",
+        )
+        webNpmDir.resolve("package.json").writeText(
+            """
+            {
+              "name": "@enaium/audio-io-kmp",
+              "version": "$webNpmVersion",
+              "description": "Web Audio glue for the audio-io-kmp browser backend",
+              "license": "MIT",
+              "main": "audio-io-kmp-web.js",
+              "exports": {
+                ".": "./audio-io-kmp-web.js",
+                "./audio-io-kmp-web.js": "./audio-io-kmp-web.js",
+                "./package.json": "./package.json"
+              },
+              "files": ["audio-io-kmp-web.js", "README.md"],
+              "keywords": ["audio", "web-audio", "kotlin", "kotlin-wasm", "pcm"],
+              "homepage": "https://github.com/Enaium/audio-io-kmp",
+              "repository": {
+                "type": "git",
+                "url": "git+https://github.com/Enaium/audio-io-kmp.git"
+              }
+            }
+            """.trimIndent() + "\n",
+        )
+    }
+}
+
+tasks.register<Exec>("publishWebNpm") {
+    group = "publishing"
+    description = "Publishes @enaium/audio-io-kmp to npm (token: npm.publish.key)."
+    dependsOn("assembleWebNpm")
+    workingDir = webNpmDir
+    // The token lives in the user-level Gradle properties file
+    // (~/.gradle/gradle.properties, next to mavenCentralUsername and the
+    // signing.* entries); CI writes the same key there from a repository
+    // secret. `-Pnpm.publish.key=<token>` overrides it for one-off runs.
+    val npmKey = providers.gradleProperty("npm.publish.key")
+    doFirst {
+        val key = npmKey.orNull?.takeIf { it.isNotBlank() }
+            ?: throw GradleException(
+                "npm.publish.key is not set: add it to ~/.gradle/gradle.properties " +
+                        "or pass -Pnpm.publish.key=<token>",
+            )
+        // NODE_AUTH_TOKEN is expanded by npm through the environment, so the
+        // token never lands in the package.json/tarball; .npmrc is on npm's
+        // never-publish list anyway.
+        environment("NODE_AUTH_TOKEN", key)
+        webNpmDir.resolve(".npmrc").writeText("//registry.npmjs.org/:_authToken=\${NODE_AUTH_TOKEN}\n")
+    }
+    commandLine("npm", "publish", "--access", "public", "--tag", "latest")
+}

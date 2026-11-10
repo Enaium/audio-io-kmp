@@ -289,5 +289,8 @@ jobs:
       - name: Run the web tests
         run: ./gradlew --no-daemon :audio-io-kmp:jsNodeTest :audio-io-kmp:wasmJsNodeTest
 
-      - name: Build the browser example
-        run: ./gradlew --no-daemon :examples:browser-visualizer:browserApp
+      - name: Build the browser example and stage the npm package
+        run: >
+          ./gradlew --no-daemon
+          :examples:browser-visualizer:browserApp
+          :audio-io-kmp:assembleWebNpm
