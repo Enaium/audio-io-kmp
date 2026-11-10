@@ -59,7 +59,7 @@ Start button.
 
 ```kotlin
 commonMain.dependencies {
-    implementation("cn.enaium.audio:audio-io-kmp:1.0.1")
+    implementation("cn.enaium.audio:audio-io-kmp:1.1.0")
 }
 ```
 
