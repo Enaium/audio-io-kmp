@@ -130,6 +130,9 @@ class VisualizerUi(
     fun draw(frame: Int) {
         // Drain the capture ring first: every panel below reads the result.
         val appended = analyzer.update()
+        // Targets without threads move the playback from here; it is a no-op
+        // where a writer thread runs.
+        playback.pump()
         if (appended > 0 && !freezeWaterfall[0]) pushWaterfallRow()
         updateFrameRate()
         // A selection made while stopped is applied as soon as the stream is idle.

@@ -6,8 +6,8 @@ junit-platform = "1.11.0"
 maven-publish = "0.37.0"
 # Used by the spectrum visualizer example: Dear ImGui + ImPlot bindings and
 # the SDL3 window/renderer bindings the example draws through.
-imgui-kmp = "1.0.15"
-sdl-kmp = "1.0.12"
+imgui-kmp = "1.93.0.2"
+sdl-kmp = "3.4.18.2"
 kotlinx-browser = "0.5.0"
 
 [libraries]

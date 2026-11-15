@@ -181,6 +181,13 @@ class SpectrumAnalyzer(
     @Volatile
     private var captureRequested = false
 
+    /**
+     * `true` when the target has no threads (the browser): the UI thread reads
+     * the stream on every frame instead of a reader thread. The web backend
+     * never blocks, so [readOnce] returns as soon as the device has nothing.
+     */
+    private var pollMode = false
+
     private var rateMark = TimeSource.Monotonic.markNow()
     private var rateFrames = 0L
 
@@ -227,6 +234,7 @@ class SpectrumAnalyzer(
      */
     fun startCapture(): Boolean {
         if (isCapturing) return true
+        pollMode = false
         val stream = input ?: return fail("no capture stream is open")
         error = null
         try {
@@ -245,12 +253,11 @@ class SpectrumAnalyzer(
         // there instead of a per-platform `Thread` / `pthread_create`.
         val reader = SDLThreads.createThread("audio-visualizer-capture") { capture { captureRequested } }
         if (reader == null) {
-            captureRequested = false
-            isCapturing = false
-            runCatching { stream.stop() }
-            return fail("cannot create the capture thread")
+            // No threads on this target: the frame loop drains the stream.
+            pollMode = true
+        } else {
+            thread = reader
         }
-        thread = reader
         return true
     }
 
@@ -348,6 +355,7 @@ class SpectrumAnalyzer(
      * @return frames appended to the history.
      */
     fun update(): Int {
+        if (pollMode && isCapturing) drainWithoutThread()
         val ring = ring ?: return consumeIdle()
         val channels = ring.format.channelCount
         val available = ring.availableToRead
@@ -415,6 +423,25 @@ class SpectrumAnalyzer(
         drainScratch.copyInto(recorded, recordedFrameCount * channels, 0, take * channels)
         recordedFrameCount += take
         if (recordedFrameCount >= recordedCapacityFrames) isRecording = false
+    }
+
+    /**
+     * Reads whatever the device has buffered, up to a frame's worth of blocks,
+     * so one UI frame cannot spend unbounded time in the backend.
+     */
+    private fun drainWithoutThread() {
+        var blocks = 0
+        while (blocks < MAX_POLL_BLOCKS_PER_FRAME) {
+            val frames = try {
+                readOnce()
+            } catch (e: Exception) {
+                fail("capture failed: ${e.message ?: e.toString()}")
+                isCapturing = false
+                break
+            }
+            if (frames <= 0) break
+            blocks++
+        }
     }
 
     private fun consumeIdle(): Int {
@@ -504,5 +531,8 @@ class SpectrumAnalyzer(
         private const val MIN_HISTORY_FRAMES: Int = 4096
 
         private const val RATE_WINDOW_MILLIS: Long = 500
+
+        /** Blocks one frame drains when the target has no reader thread. */
+        private const val MAX_POLL_BLOCKS_PER_FRAME: Int = 64
     }
 }

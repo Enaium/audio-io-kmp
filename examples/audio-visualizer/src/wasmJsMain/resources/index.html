@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Audio Spectrum Visualizer</title>
+    <style>
+        html, body { margin: 0; height: 100%; background: #121218; overflow: hidden; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<!-- Web Audio glue of audio-io-kmp: installs the audioIo_* functions the
+     browser backend declares. Loaded before the module starts. -->
+<script src="audio-io-kmp-web.js"></script>
+<script type="module">
+    // SDL3 owns the canvas and the renderer; Dear ImGui produces the draw data
+    // the Kotlin backend copies into SDL's geometry API. Both Emscripten
+    // modules have to be initialized before the Kotlin module runs.
+    import { initSdlKmp } from './sdl_kmp_glue.js';
+    import { initImguiKmp } from './imgui_kmp_glue.js';
+
+    const canvas = document.getElementById('canvas');
+
+    // ImGui consumes the right button itself; without this the browser's
+    // context menu opens on top of the canvas and swallows the button-up.
+    canvas.addEventListener('contextmenu', (event) => event.preventDefault());
+    canvas.addEventListener('auxclick', (event) => {
+        if (event.button === 1) event.preventDefault();
+    });
+
+    await initSdlKmp({ canvas });
+    await initImguiKmp();
+
+    // The bundle derives its public path from the last <script> element, which
+    // an inline module does not provide; injecting it once the Emscripten
+    // modules are ready keeps that lookup working (and keeps the order: SDL and
+    // imgui have to be initialized before the Kotlin module runs).
+    const module = document.createElement('script');
+    module.type = 'module';
+    module.src = './audio-visualizer.js';
+    document.head.append(module);
+</script>
+</body>
+</html>

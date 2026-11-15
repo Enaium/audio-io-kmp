@@ -8,6 +8,7 @@ import cn.enaium.sdl.SDL
 import cn.enaium.sdl.SDLThread
 import cn.enaium.sdl.SDLThreads
 import kotlin.concurrent.Volatile
+import kotlin.time.TimeSource
 
 /**
  * Plays a recorded buffer back through an output stream.
@@ -20,6 +21,10 @@ import kotlin.concurrent.Volatile
  * the device chunk by chunk. [playedFrames], [isPlaying] and [error] are
  * written by the writer thread and read by the UI; [stop] unblocks it by
  * stopping the stream.
+ *
+ * Targets without threads (the browser) fall back to [pump]: the UI calls it
+ * once per frame, the backend never blocks, and the stream is closed once the
+ * frames had time to play.
  *
  * Playback and capture are independent: both can run at the same time, and a
  * backend that refuses full duplex reports that through [error].
@@ -53,6 +58,15 @@ class Playback(private val system: AudioSystem?) : AutoCloseable {
 
     private var output: AudioOutput? = null
     private var thread: SDLThread? = null
+
+    // Pump mode: no writer thread on this target, [pump] moves the frames.
+    private var pumpMode = false
+    private var pumpOffset = 0
+    private var pumpChunk = 0
+    private var pumpSamples: FloatArray? = null
+    private var pumpBuffer: AudioBuffer? = null
+    private var pumpSlice: FloatArray? = null
+    private var pumpDoneMark: TimeSource.Monotonic.ValueTimeMark? = null
 
     @Volatile
     private var keepWriting = false
@@ -96,16 +110,57 @@ class Playback(private val system: AudioSystem?) : AutoCloseable {
                 }
             }
             if (writer == null) {
-                keepWriting = false
-                isPlaying = false
-                closeOutput()
-                return fail("cannot create the playback thread")
+                // No threads on this target: [pump] writes from the frame loop.
+                pumpMode = true
+                pumpOffset = 0
+                pumpChunk = chunk
+                pumpSamples = samples
+                pumpDoneMark = null
+            } else {
+                thread = writer
             }
-            thread = writer
             true
         } catch (e: Exception) {
             closeOutput()
             fail("cannot play: ${e.message ?: e.toString()}")
+        }
+    }
+
+    /**
+     * Writes what the output accepts right now; call once per frame on targets
+     * without a writer thread (the browser). Does nothing otherwise.
+     */
+    fun pump() {
+        if (!pumpMode) return
+        val stream = output ?: return
+        val samples = pumpSamples ?: return
+        val channels = format?.channelCount ?: return
+        val chunk = pumpChunk
+        if (chunk <= 0) return
+        val buffer = pumpBuffer ?: AudioBuffer(stream.format, chunk).also { pumpBuffer = it }
+        val slice = pumpSlice ?: FloatArray(chunk * channels).also { pumpSlice = it }
+        var blocks = 0
+        while (keepWriting && pumpOffset < totalFrames && blocks < MAX_PUMP_BLOCKS) {
+            val count = minOf(chunk, totalFrames.toInt() - pumpOffset)
+            samples.copyInto(slice, 0, pumpOffset * channels, (pumpOffset + count) * channels)
+            buffer.clear()
+            buffer.putFloats(slice, count * channels)
+            val written = try {
+                stream.write(buffer)
+            } catch (e: Exception) {
+                fail("playback failed: ${e.message ?: e.toString()}")
+                break
+            }
+            if (written <= 0) break
+            pumpOffset += written
+            playedFrames = pumpOffset.toLong()
+            blocks++
+        }
+        if (pumpOffset >= totalFrames) {
+            // The device ring still holds up to a second of audio; closing now
+            // would cut it.
+            val mark = pumpDoneMark ?: TimeSource.Monotonic.markNow().also { pumpDoneMark = it }
+            if (mark.elapsedNow().inWholeMilliseconds >= PUMP_TAIL_MILLIS) stop()
         }
     }
 
@@ -119,6 +174,13 @@ class Playback(private val system: AudioSystem?) : AutoCloseable {
         writer?.wait()
         closeOutput()
         isPlaying = false
+        pumpMode = false
+        pumpSamples = null
+        pumpBuffer = null
+        pumpSlice = null
+        pumpOffset = 0
+        pumpChunk = 0
+        pumpDoneMark = null
     }
 
     override fun close() {
@@ -179,5 +241,11 @@ class Playback(private val system: AudioSystem?) : AutoCloseable {
 
         /** Device buffer requested from the output, in frames (~21 ms at 48 kHz). */
         const val OUTPUT_BUFFER_FRAMES = 1024
+
+        /** Blocks one frame writes in pump mode (the browser). */
+        const val MAX_PUMP_BLOCKS = 64
+
+        /** How long the device ring may still hold audio after the last frame. */
+        const val PUMP_TAIL_MILLIS = 1100L
     }
 }

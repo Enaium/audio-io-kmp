@@ -292,5 +292,5 @@ jobs:
       - name: Build the browser example and stage the npm package
         run: >
           ./gradlew --no-daemon
-          :examples:browser-visualizer:browserApp
+          :examples:audio-visualizer:wasmJsBrowserDistribution
           :audio-io-kmp:assembleWebNpm

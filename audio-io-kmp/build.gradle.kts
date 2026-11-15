@@ -2,9 +2,6 @@ import org.gradle.internal.os.OperatingSystem
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
-import org.jetbrains.kotlin.gradle.targets.js.nodejs.NodeJsEnvSpec
-import org.jetbrains.kotlin.gradle.targets.js.nodejs.NodeJsPlugin
-
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.android.kmp.library)
@@ -281,13 +278,6 @@ mavenPublishing {
             url.set("https://github.com/Enaium/audio-io-kmp/issues")
         }
     }
-}
-
-// The Kotlin web toolchain wants to fetch its Node build from a repository this
-// project does not resolve from. The Node on PATH (every CI image and developer
-// machine has one) is used instead.
-plugins.withType<NodeJsPlugin> {
-    the<NodeJsEnvSpec>().download = false
 }
 
 // ==================== wasm/js: npm package ====================

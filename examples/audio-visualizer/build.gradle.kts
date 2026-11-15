@@ -40,6 +40,18 @@ kotlin {
         binaries.executable()
     }
 
+    // The same commonMain interface runs in the browser: SDL3 and Dear ImGui
+    // come from their Emscripten modules, which the page loads before this
+    // module. Frames are driven from requestAnimationFrame (see the wasm main).
+    wasmJs {
+        binaries.executable()
+        browser {
+            commonWebpackConfig {
+                outputFileName = "audio-visualizer.js"
+            }
+        }
+    }
+
     linuxX64 {
         binaries.executable()
     }
@@ -95,6 +107,16 @@ kotlin {
     }
 
     sourceSets {
+        val wasmJsMain by getting {
+            dependencies {
+                implementation(libs.kotlinx.browser)
+                // The Emscripten runtimes (SDL3 and Dear ImGui) are npm
+                // packages; the task below copies them next to the page.
+                implementation(npm("@enaium/sdl-kmp", "3.4.18-2"))
+                implementation(npm("@enaium/imgui-kmp", "1.93.0-2"))
+            }
+        }
+
         commonMain {
             dependencies {
                 implementation(project(":audio-io-kmp"))
@@ -113,4 +135,43 @@ tasks.withType<JavaExec>().configureEach {
     if (org.gradle.internal.os.OperatingSystem.current().isMacOsX && name == "jvmRun") {
         jvmArgs("--enable-native-access=ALL-UNNAMED", "-XstartOnFirstThread")
     }
+}
+
+// ==================== Browser assets ====================
+// The Kotlin/Wasm module only carries the bindings: SDL3 and Dear ImGui are
+// Emscripten modules that the page loads first. Both npm packages are installed
+// by the JS toolchain, so their files are copied into the web resources.
+val copyWasmAssets by tasks.registering {
+    description = "Copies the SDL and imgui Emscripten runtimes next to the page."
+    dependsOn(":kotlinWasmNpmInstall")
+    // The JS toolchain installs the npm dependencies of every project into the
+    // root build directory.
+    val sdlAssets = rootProject.layout.buildDirectory.dir("wasm/node_modules/@enaium/sdl-kmp")
+    val imguiAssets = rootProject.layout.buildDirectory.dir("wasm/node_modules/@enaium/imgui-kmp")
+    val output = layout.buildDirectory.dir("generated/wasmResources")
+    outputs.dir(output)
+    doLast {
+        val dir = output.get().asFile
+        dir.deleteRecursively()
+        dir.mkdirs()
+        copy {
+            from(sdlAssets)
+            into(dir)
+        }
+        copy {
+            from(imguiAssets)
+            into(dir)
+        }
+        // The browser backend of audio-io-kmp only declares the audioIo_*
+        // functions; this file installs them.
+        copy {
+            from(rootProject.file("audio-io-kmp/src/webMain/resources/audio-io-kmp-web.js"))
+            into(dir)
+        }
+    }
+}
+
+tasks.named<ProcessResources>("wasmJsProcessResources") {
+    dependsOn(copyWasmAssets)
+    from(copyWasmAssets)
 }

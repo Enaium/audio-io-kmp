@@ -245,7 +245,7 @@ audio-io-kmp/                       the library
   src/webMain/resources             audio-io-kmp-web.js, the Web Audio glue
   src/nativeInterop/cinterop        cinterop definitions (ALSA, WASAPI, AAudio)
 examples/audio-visualizer/          Dear ImGui + ImPlot spectrum visualizer
-examples/browser-visualizer/        the same visualizer as a web page (Kotlin/Wasm)
+  src/wasmJsMain                    the same visualizer as a Kotlin/Wasm page
 ```
 
 The native targets compile `src/nativeMain` plus the directory of their OS
@@ -335,18 +335,24 @@ MIT
 
 ## Browser example
 
-`examples/browser-visualizer` is the same visualizer as a web page: Kotlin/Wasm
-draws through the Web Audio backend and a small page glue, with the waveform,
-the spectrum and a scrolling waterfall on a canvas and the same controls (start,
-record, play, clear, analysis window).
+The visualizer also runs in the browser: the very same `commonMain` interface
+(Dear ImGui + ImPlot) is compiled to Kotlin/Wasm, SDL3 renders the canvas and
+the audio streams come from the Web Audio backend of this library.
 
 ```shell
-./gradlew :examples:browser-visualizer:browserApp   # builds build/browserApp
-python3 -m http.server 8080 -d examples/browser-visualizer/build/browserApp
+./gradlew :examples:audio-visualizer:wasmJsBrowserDistribution
+python3 -m http.server 8080 -d examples/audio-visualizer/build/dist/wasmJs/productionExecutable
 # open http://localhost:8080
 ```
 
-The page has to be served over `http://localhost` (or HTTPS): the microphone is
-only available in a secure context. `browserApp` assembles the wasm bundle, the
-page glue and the library's Web Audio glue into one directory; the module also
-depends on `kotlinx-browser` for the DOM and typed arrays.
+The distribution already contains the Emscripten runtimes (SDL3 and Dear ImGui,
+copied from their npm packages by the build) and the Web Audio glue, so the
+directory is the whole page. Serve it over `http://localhost` or HTTPS: the
+microphone is only available in a secure context, and the browser asks for
+permission on the first Start.
+
+The browser has no threads, so the example switches the capture to a polling
+path (the frame loop drains the stream, the Web Audio backend never blocks) and
+the playback to a pump driven by the same loop. Everything else — the plots,
+the controls, the recording, the statistics — is the desktop code.
+
